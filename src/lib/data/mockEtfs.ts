@@ -10,6 +10,8 @@ export interface ETF {
   name: string;
   expenseRatio: number;
   holdings: Holding[];
+  totalHoldingsCount?: number;
+  sectors?: { sector: string; weight: number }[];
 }
 
 export const MOCK_ETFS: Record<string, ETF> = {

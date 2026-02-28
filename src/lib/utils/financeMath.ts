@@ -1,4 +1,5 @@
 import { ETF, Holding } from "../data/mockEtfs";
+import { ETF_HOLDINGS_COUNT } from "../constants/etfReference";
 
 export interface SectorBreakdown {
   sector: string;
@@ -17,7 +18,11 @@ export interface ConcentrationItem {
  * that accounts for the remainder up to 100%.
  * The "Others" entry includes a sector breakdown of the remaining holdings.
  */
-export function getConcentrationData(holdings: Holding[]): ConcentrationItem[] {
+export function getConcentrationData(
+  holdings: Holding[],
+  ticker?: string,
+  totalHoldingsCount?: number
+): ConcentrationItem[] {
   const sorted = [...holdings].sort((a, b) => b.weight - a.weight);
   const top10 = sorted.slice(0, 10);
   const remaining = sorted.slice(10);
@@ -39,15 +44,41 @@ export function getConcentrationData(holdings: Holding[]): ConcentrationItem[] {
     .map(([sector, weight]) => ({ sector, weight }))
     .sort((a, b) => b.weight - a.weight);
 
+  // Priority: reference table → API count → holdings array length
+  const referenceCount = ticker ? ETF_HOLDINGS_COUNT[ticker.toUpperCase()] : undefined;
+  const bestTotal = referenceCount ?? totalHoldingsCount ?? holdings.length;
+  const othersCount = Math.max(bestTotal - 10, remaining.length);
+
   return [
     ...top10.map((h) => ({ name: h.name, weight: h.weight })),
     {
       name: "Others",
       weight: othersWeight,
       othersSectorMix,
-      othersCount: remaining.length,
+      othersCount,
     },
   ];
+}
+
+/**
+ * Returns the sector with the highest combined weight across all holdings.
+ * Ties are broken alphabetically for stable, deterministic results.
+ */
+export function getTopSector(holdings: Holding[]): { sector: string; weight: number } {
+  if (holdings.length === 0) {
+    return { sector: "N/A", weight: 0 };
+  }
+
+  const sectorMap: Record<string, number> = {};
+  for (const h of holdings) {
+    sectorMap[h.sector] = Math.round(((sectorMap[h.sector] || 0) + h.weight) * 100) / 100;
+  }
+
+  const sorted = Object.entries(sectorMap).sort(
+    (a, b) => b[1] - a[1] || a[0].localeCompare(b[0])
+  );
+
+  return { sector: sorted[0][0], weight: sorted[0][1] };
 }
 
 export interface SharedHolding {

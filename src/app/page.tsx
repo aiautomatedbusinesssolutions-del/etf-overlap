@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { BarChart3 } from "lucide-react";
-import { MOCK_ETFS } from "@/lib/data/mockEtfs";
-import { getConcentrationData, calculateOverlap } from "@/lib/utils/financeMath";
+import { useState, useEffect, useCallback } from "react";
+import { BarChart3, AlertCircle, X } from "lucide-react";
+import { MOCK_ETFS, ETF } from "@/lib/data/mockEtfs";
+import { getConcentrationData, calculateOverlap, getTopSector } from "@/lib/utils/financeMath";
+import { getEtfHoldings } from "@/lib/services/fmpApi";
 import EducationCard from "@/components/features/EducationCard";
 import DualSearchBar from "@/components/features/DualSearchBar";
 import WhaleChart from "@/components/features/WhaleChart";
@@ -13,13 +14,93 @@ import FeeBattle from "@/components/features/FeeBattle";
 export default function Home() {
   const [tickerA, setTickerA] = useState("SPY");
   const [tickerB, setTickerB] = useState("QQQ");
+  const [etfA, setEtfA] = useState<ETF>(MOCK_ETFS["SPY"]);
+  const [etfB, setEtfB] = useState<ETF>(MOCK_ETFS["QQQ"]);
+  const [loadingA, setLoadingA] = useState(false);
+  const [loadingB, setLoadingB] = useState(false);
+  const [isLiveA, setIsLiveA] = useState(false);
+  const [isLiveB, setIsLiveB] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
-  const etfA = MOCK_ETFS[tickerA];
-  const etfB = MOCK_ETFS[tickerB];
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 5000);
+  }, []);
 
-  const concentrationA = etfA ? getConcentrationData(etfA.holdings) : null;
-  const concentrationB = etfB ? getConcentrationData(etfB.holdings) : null;
-  const overlapResult = etfA && etfB ? calculateOverlap(etfA, etfB) : null;
+  const resolveEtf = useCallback(async (
+    ticker: string,
+    fallbackTicker: string
+  ): Promise<{ etf: ETF; message: string | null; isLive: boolean }> => {
+    // Check mock data first
+    if (MOCK_ETFS[ticker]) {
+      return { etf: MOCK_ETFS[ticker], message: null, isLive: false };
+    }
+
+    // Try live API
+    const result = await getEtfHoldings(ticker);
+
+    if (result.data) {
+      return { etf: result.data.etf, message: null, isLive: true };
+    }
+
+    // Error fallback
+    const fallback = MOCK_ETFS[fallbackTicker];
+    if (result.error === "rate_limited") {
+      return {
+        etf: fallback,
+        message: `Alpha Vantage is busy. Falling back to ${fallbackTicker} mock data for now.`,
+        isLive: false,
+      };
+    }
+
+    return {
+      etf: fallback,
+      message: `"${ticker}" not found — using ${fallbackTicker} mock data`,
+      isLive: false,
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingA(true);
+
+    resolveEtf(tickerA, "SPY")
+      .then(({ etf, message, isLive }) => {
+        if (cancelled) return;
+        setEtfA(etf);
+        setIsLiveA(isLive);
+        if (message) showToast(message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingA(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [tickerA, resolveEtf, showToast]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingB(true);
+
+    resolveEtf(tickerB, "QQQ")
+      .then(({ etf, message, isLive }) => {
+        if (cancelled) return;
+        setEtfB(etf);
+        setIsLiveB(isLive);
+        if (message) showToast(message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingB(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [tickerB, resolveEtf, showToast]);
+
+  const concentrationA = getConcentrationData(etfA.holdings, etfA.ticker, etfA.totalHoldingsCount);
+  const concentrationB = getConcentrationData(etfB.holdings, etfB.ticker, etfB.totalHoldingsCount);
+  const topSectorA = getTopSector(etfA.holdings);
+  const topSectorB = getTopSector(etfB.holdings);
+  const overlapResult = calculateOverlap(etfA, etfB);
 
   function handleSelect(side: "A" | "B", ticker: string) {
     if (side === "A") setTickerA(ticker);
@@ -48,38 +129,75 @@ export default function Home() {
           onSelect={handleSelect}
           selectedA={tickerA}
           selectedB={tickerB}
+          loadingA={loadingA}
+          loadingB={loadingB}
         />
 
         {/* Concentration Donuts */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {concentrationA ? (
-            <WhaleChart data={concentrationA} ticker={etfA.ticker} name={etfA.name} />
-          ) : (
-            <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-center text-slate-500">
-              Select a valid ticker for Fund A
-            </div>
-          )}
-          {concentrationB ? (
-            <WhaleChart data={concentrationB} ticker={etfB.ticker} name={etfB.name} />
-          ) : (
-            <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-center text-slate-500">
-              Select a valid ticker for Fund B
-            </div>
-          )}
+          <div className="relative">
+            {loadingA && <ChartLoader />}
+            <WhaleChart
+              data={concentrationA}
+              ticker={etfA.ticker}
+              name={etfA.name}
+              topSector={topSectorA.sector}
+              topSectorWeight={topSectorA.weight}
+              etfSectors={etfA.sectors}
+              isLive={isLiveA}
+            />
+          </div>
+          <div className="relative">
+            {loadingB && <ChartLoader />}
+            <WhaleChart
+              data={concentrationB}
+              ticker={etfB.ticker}
+              name={etfB.name}
+              topSector={topSectorB.sector}
+              topSectorWeight={topSectorB.weight}
+              etfSectors={etfB.sectors}
+              isLive={isLiveB}
+            />
+          </div>
         </div>
+        <p className="text-center text-xs italic text-slate-600">
+          Hover or tap the &quot;Others&quot; slice to see the hidden sector breakdown.
+        </p>
 
         {/* Overlap Scoreboard */}
-        {overlapResult && (
-          <OverlapScoreboard
-            result={overlapResult}
-            tickerA={tickerA}
-            tickerB={tickerB}
-          />
-        )}
+        <OverlapScoreboard
+          result={overlapResult}
+          tickerA={tickerA}
+          tickerB={tickerB}
+        />
 
         {/* Fee Battle */}
-        {etfA && etfB && <FeeBattle etfA={etfA} etfB={etfB} />}
+        <FeeBattle etfA={etfA} etfB={etfB} />
       </div>
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
+          <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-slate-900 px-4 py-2.5 shadow-xl">
+            <AlertCircle className="h-4 w-4 shrink-0 text-amber-400" />
+            <p className="text-sm text-slate-300">{toast}</p>
+            <button onClick={() => setToast(null)} className="ml-1 text-slate-500 hover:text-slate-300">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
     </main>
+  );
+}
+
+function ChartLoader() {
+  return (
+    <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-slate-900/80 backdrop-blur-sm">
+      <div className="text-center">
+        <div className="mx-auto mb-2 h-6 w-6 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400" />
+        <p className="text-xs text-slate-400">Searching live data...</p>
+      </div>
+    </div>
   );
 }
