@@ -6,7 +6,7 @@ import { X } from "lucide-react";
 import { ConcentrationItem, SectorBreakdown } from "@/lib/utils/financeMath";
 import { ETF_HOLDINGS_COUNT, BOND_ETFS } from "@/lib/constants/etfReference";
 
-const COLORS = [
+const SLICE_COLORS = [
   "#38bdf8", // sky-400
   "#818cf8", // indigo-400
   "#a78bfa", // violet-400
@@ -17,8 +17,22 @@ const COLORS = [
   "#fb923c", // orange-400
   "#fbbf24", // amber-400
   "#34d399", // emerald-400
-  "#475569", // slate-600 (Others)
 ];
+const OTHERS_COLOR = "#475569"; // slate-600
+
+/** Deterministic color for a holding name — same name always gets same color across charts. */
+function getColorForName(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
+  }
+  return SLICE_COLORS[Math.abs(hash) % SLICE_COLORS.length];
+}
+
+function getSliceColor(name: string): string {
+  if (name === "Others") return OTHERS_COLOR;
+  return getColorForName(name);
+}
 
 interface WhaleChartProps {
   data: ConcentrationItem[];
@@ -28,6 +42,7 @@ interface WhaleChartProps {
   topSectorWeight: number;
   etfSectors?: { sector: string; weight: number }[];
   isLive?: boolean;
+  cached?: boolean;
 }
 
 function getConcentrationNote(weight: number): { text: string; color: string } | null {
@@ -66,7 +81,7 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: any[] 
   );
 }
 
-export default function WhaleChart({ data, ticker, name, topSector, topSectorWeight, etfSectors, isLive }: WhaleChartProps) {
+export default function WhaleChart({ data, ticker, name, topSector, topSectorWeight, etfSectors, isLive, cached }: WhaleChartProps) {
   const [selected, setSelected] = useState<ConcentrationItem | null>(null);
   const [showOthers, setShowOthers] = useState(false);
   const [tapped, setTapped] = useState(false);
@@ -126,7 +141,6 @@ export default function WhaleChart({ data, ticker, name, topSector, topSectorWei
   if (useHoldingSectors) {
     sectorLabel = "Sector Mix";
   } else if (useEtfSectors) {
-    // ETF-level sectors from API cover top 10 only on free tier
     sectorLabel = isLive ? "Top 10 Sector Concentration" : "Fund-Level Sectors";
   }
 
@@ -138,11 +152,18 @@ export default function WhaleChart({ data, ticker, name, topSector, topSectorWei
   const hasNoHoldings = data.length <= 1 && data[0]?.name === "Others";
   const refCount = ETF_HOLDINGS_COUNT[ticker.toUpperCase()];
 
+  const cacheBadge = cached && (
+    <span className="ml-1.5 inline-block rounded bg-emerald-500/15 px-1 py-0.5 text-[9px] font-medium leading-none text-emerald-400">
+      Cached
+    </span>
+  );
+
   if (hasNoHoldings) {
     return (
-      <div ref={chartRef} className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <div ref={chartRef} className="rounded-xl border border-slate-800 bg-slate-900 p-4 transition-colors hover:border-slate-700">
         <div className="mb-2 text-center">
           <span className="text-lg font-bold text-sky-400">{ticker}</span>
+          {cacheBadge}
           <p className="text-xs text-slate-400 truncate">{name}</p>
         </div>
         <div className="flex flex-col items-center justify-center py-10 text-center">
@@ -173,10 +194,11 @@ export default function WhaleChart({ data, ticker, name, topSector, topSectorWei
   }
 
   return (
-    <div ref={chartRef} className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+    <div ref={chartRef} className="rounded-xl border border-slate-800 bg-slate-900 p-4 transition-colors hover:border-slate-700">
       {/* Header with Top Sector */}
       <div className="mb-2 text-center">
         <span className="text-lg font-bold text-sky-400">{ticker}</span>
+        {cacheBadge}
         <p className="text-xs text-slate-400 truncate">{name}</p>
         <p className="mt-1 text-xs">
           <span className="text-slate-500">Primary Sector: </span>
@@ -202,7 +224,7 @@ export default function WhaleChart({ data, ticker, name, topSector, topSectorWei
             {data.map((entry, i) => (
               <Cell
                 key={i}
-                fill={COLORS[i % COLORS.length]}
+                fill={getSliceColor(entry.name)}
                 stroke={selected?.name === entry.name ? "#f1f5f9" : "transparent"}
                 strokeWidth={selected?.name === entry.name ? 2 : 0}
                 className="cursor-pointer"
@@ -307,7 +329,7 @@ export default function WhaleChart({ data, ticker, name, topSector, topSectorWei
           <div key={i} className="flex items-center gap-1.5 text-xs text-slate-400 truncate">
             <span
               className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
-              style={{ backgroundColor: COLORS[i] }}
+              style={{ backgroundColor: getSliceColor(item.name) }}
             />
             <span className="truncate">{item.name}</span>
           </div>

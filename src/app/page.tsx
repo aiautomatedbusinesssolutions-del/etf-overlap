@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { BarChart3, AlertCircle, X } from "lucide-react";
 import { MOCK_ETFS, ETF } from "@/lib/data/mockEtfs";
 import { getConcentrationData, calculateOverlap, getTopSector } from "@/lib/utils/financeMath";
@@ -20,7 +20,28 @@ export default function Home() {
   const [loadingB, setLoadingB] = useState(false);
   const [isLiveA, setIsLiveA] = useState(false);
   const [isLiveB, setIsLiveB] = useState(false);
+  const [cachedA, setCachedA] = useState(false);
+  const [cachedB, setCachedB] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+
+  // 1. Read URL params on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const a = params.get("a")?.toUpperCase();
+    const b = params.get("b")?.toUpperCase();
+    if (a && a !== tickerA) setTickerA(a);
+    if (b && b !== tickerB) setTickerB(b);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 2. Sync tickers to URL
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (tickerA) params.set("a", tickerA);
+    if (tickerB) params.set("b", tickerB);
+    const url = `${window.location.pathname}?${params.toString()}`;
+    window.history.replaceState(null, "", url);
+  }, [tickerA, tickerB]);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -30,17 +51,17 @@ export default function Home() {
   const resolveEtf = useCallback(async (
     ticker: string,
     fallbackTicker: string
-  ): Promise<{ etf: ETF; message: string | null; isLive: boolean }> => {
+  ): Promise<{ etf: ETF; message: string | null; isLive: boolean; cached: boolean }> => {
     // Check mock data first
     if (MOCK_ETFS[ticker]) {
-      return { etf: MOCK_ETFS[ticker], message: null, isLive: false };
+      return { etf: MOCK_ETFS[ticker], message: null, isLive: false, cached: false };
     }
 
     // Try live API
     const result = await getEtfHoldings(ticker);
 
     if (result.data) {
-      return { etf: result.data.etf, message: null, isLive: true };
+      return { etf: result.data.etf, message: null, isLive: true, cached: result.data.cached };
     }
 
     // Error fallback
@@ -50,6 +71,7 @@ export default function Home() {
         etf: fallback,
         message: `Alpha Vantage is busy. Falling back to ${fallbackTicker} mock data for now.`,
         isLive: false,
+        cached: false,
       };
     }
 
@@ -57,6 +79,7 @@ export default function Home() {
       etf: fallback,
       message: `"${ticker}" not found — using ${fallbackTicker} mock data`,
       isLive: false,
+      cached: false,
     };
   }, []);
 
@@ -65,10 +88,11 @@ export default function Home() {
     setLoadingA(true);
 
     resolveEtf(tickerA, "SPY")
-      .then(({ etf, message, isLive }) => {
+      .then(({ etf, message, isLive, cached }) => {
         if (cancelled) return;
         setEtfA(etf);
         setIsLiveA(isLive);
+        setCachedA(cached);
         if (message) showToast(message);
       })
       .finally(() => {
@@ -83,10 +107,11 @@ export default function Home() {
     setLoadingB(true);
 
     resolveEtf(tickerB, "QQQ")
-      .then(({ etf, message, isLive }) => {
+      .then(({ etf, message, isLive, cached }) => {
         if (cancelled) return;
         setEtfB(etf);
         setIsLiveB(isLive);
+        setCachedB(cached);
         if (message) showToast(message);
       })
       .finally(() => {
@@ -96,15 +121,16 @@ export default function Home() {
     return () => { cancelled = true; };
   }, [tickerB, resolveEtf, showToast]);
 
-  const concentrationA = getConcentrationData(etfA.holdings, etfA.ticker, etfA.totalHoldingsCount);
-  const concentrationB = getConcentrationData(etfB.holdings, etfB.ticker, etfB.totalHoldingsCount);
-  const topSectorA = getTopSector(etfA.holdings);
-  const topSectorB = getTopSector(etfB.holdings);
-  const overlapResult = calculateOverlap(etfA, etfB);
+  const concentrationA = useMemo(() => getConcentrationData(etfA.holdings, etfA.ticker, etfA.totalHoldingsCount), [etfA]);
+  const concentrationB = useMemo(() => getConcentrationData(etfB.holdings, etfB.ticker, etfB.totalHoldingsCount), [etfB]);
+  const topSectorA = useMemo(() => getTopSector(etfA.holdings), [etfA]);
+  const topSectorB = useMemo(() => getTopSector(etfB.holdings), [etfB]);
+  const overlapResult = useMemo(() => calculateOverlap(etfA, etfB), [etfA, etfB]);
 
   function handleSelect(side: "A" | "B", ticker: string) {
-    if (side === "A") setTickerA(ticker);
-    else setTickerB(ticker);
+    const value = ticker.trim().toUpperCase();
+    if (side === "A") setTickerA(value);
+    else setTickerB(value);
   }
 
   return (
@@ -134,30 +160,40 @@ export default function Home() {
         />
 
         {/* Concentration Donuts */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
           <div className="relative">
-            {loadingA && <ChartLoader />}
-            <WhaleChart
-              data={concentrationA}
-              ticker={etfA.ticker}
-              name={etfA.name}
-              topSector={topSectorA.sector}
-              topSectorWeight={topSectorA.weight}
-              etfSectors={etfA.sectors}
-              isLive={isLiveA}
-            />
+            {loadingA && <ChartSkeleton />}
+            {!tickerA ? (
+              <EmptyChartState />
+            ) : (
+              <WhaleChart
+                data={concentrationA}
+                ticker={etfA.ticker}
+                name={etfA.name}
+                topSector={topSectorA.sector}
+                topSectorWeight={topSectorA.weight}
+                etfSectors={etfA.sectors}
+                isLive={isLiveA}
+                cached={cachedA}
+              />
+            )}
           </div>
           <div className="relative">
-            {loadingB && <ChartLoader />}
-            <WhaleChart
-              data={concentrationB}
-              ticker={etfB.ticker}
-              name={etfB.name}
-              topSector={topSectorB.sector}
-              topSectorWeight={topSectorB.weight}
-              etfSectors={etfB.sectors}
-              isLive={isLiveB}
-            />
+            {loadingB && <ChartSkeleton />}
+            {!tickerB ? (
+              <EmptyChartState />
+            ) : (
+              <WhaleChart
+                data={concentrationB}
+                ticker={etfB.ticker}
+                name={etfB.name}
+                topSector={topSectorB.sector}
+                topSectorWeight={topSectorB.weight}
+                etfSectors={etfB.sectors}
+                isLive={isLiveB}
+                cached={cachedB}
+              />
+            )}
           </div>
         </div>
         <p className="text-center text-xs italic text-slate-600">
@@ -191,12 +227,38 @@ export default function Home() {
   );
 }
 
-function ChartLoader() {
+function ChartSkeleton() {
   return (
-    <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-slate-900/80 backdrop-blur-sm">
+    <div className="absolute inset-0 z-10 rounded-xl border border-slate-800 bg-slate-900 p-4">
+      {/* Header skeleton */}
+      <div className="mb-2 flex flex-col items-center gap-1.5">
+        <div className="h-5 w-12 animate-pulse rounded bg-slate-800" />
+        <div className="h-3 w-32 animate-pulse rounded bg-slate-800" />
+        <div className="h-3 w-24 animate-pulse rounded bg-slate-800" />
+      </div>
+      {/* Donut skeleton */}
+      <div className="flex justify-center py-4">
+        <div className="h-[170px] w-[170px] animate-pulse rounded-full border-[30px] border-slate-800 bg-slate-900" />
+      </div>
+      {/* Legend skeleton */}
+      <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1.5">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-1.5">
+            <div className="h-2.5 w-2.5 animate-pulse rounded-sm bg-slate-800" />
+            <div className="h-3 w-20 animate-pulse rounded bg-slate-800" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EmptyChartState() {
+  return (
+    <div className="flex items-center justify-center rounded-xl border border-dashed border-slate-700 bg-slate-900/50 p-4 py-20">
       <div className="text-center">
-        <div className="mx-auto mb-2 h-6 w-6 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400" />
-        <p className="text-xs text-slate-400">Searching live data...</p>
+        <BarChart3 className="mx-auto mb-2 h-8 w-8 text-slate-700" />
+        <p className="text-sm text-slate-500">Search for an ETF to see the Whales</p>
       </div>
     </div>
   );

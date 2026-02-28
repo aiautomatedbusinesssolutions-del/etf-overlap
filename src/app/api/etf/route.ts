@@ -1,11 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const BASE_URL = "https://www.alphavantage.co/query";
+const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+const cache = new Map<string, { data: unknown; expiry: number }>();
+
+function getCached(key: string): unknown | null {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiry) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+function setCache(key: string, data: unknown) {
+  cache.set(key, { data, expiry: Date.now() + CACHE_TTL });
+}
 
 export async function GET(request: NextRequest) {
-  const ticker = request.nextUrl.searchParams.get("ticker");
+  const ticker = request.nextUrl.searchParams.get("ticker")?.toUpperCase();
   if (!ticker) {
     return NextResponse.json({ error: "Missing ticker parameter" }, { status: 400 });
+  }
+
+  // Return cached response if available
+  const cached = getCached(ticker);
+  if (cached) {
+    return NextResponse.json({ ...(cached as Record<string, unknown>), cached: true });
   }
 
   const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
@@ -49,14 +72,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Ticker not found" }, { status: 404 });
     }
 
-    console.log(`Finnhub Search for ${ticker.toUpperCase()} successful`);
+    const result = { name: ticker, expenseRatio, holdings, sectors };
+    setCache(ticker, result);
 
-    return NextResponse.json({
-      name: ticker.toUpperCase(),
-      expenseRatio,
-      holdings,
-      sectors,
-    });
+    return NextResponse.json(result);
   } catch {
     return NextResponse.json({ error: "Failed to fetch from data provider" }, { status: 500 });
   }

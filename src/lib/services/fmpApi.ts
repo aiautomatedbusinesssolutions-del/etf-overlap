@@ -14,6 +14,7 @@ interface AlphaSector {
 export interface FetchResult {
   etf: ETF;
   isLive: boolean;
+  cached: boolean;
 }
 
 export type FetchError = "rate_limited" | "not_found" | "error";
@@ -34,7 +35,10 @@ export async function getEtfHoldings(
       expenseRatio: number | null;
       holdings: AlphaHolding[] | null;
       sectors: AlphaSector[] | null;
+      cached?: boolean;
     } = await res.json();
+
+    const isCached = data.cached === true;
 
     const etfName = data.name || ticker.toUpperCase();
     const expenseRatio = data.expenseRatio ?? 0.1;
@@ -76,6 +80,7 @@ export async function getEtfHoldings(
               sectors: sectors.length > 0 ? sectors : undefined,
             },
             isLive: true,
+            cached: isCached,
           },
         };
       }
@@ -95,6 +100,7 @@ export async function getEtfHoldings(
             sectors,
           },
           isLive: true,
+          cached: isCached,
         },
       };
     }

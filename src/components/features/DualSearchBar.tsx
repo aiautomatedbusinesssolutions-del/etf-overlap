@@ -69,6 +69,7 @@ function TickerInput({
         <input
           type="text"
           placeholder="e.g. SPY, VTI, ARKK"
+          aria-label={`Search ETF for ${label}`}
           className="w-full bg-transparent text-sm text-slate-100 placeholder-slate-500 outline-none"
           value={query}
           onChange={(e) => {
