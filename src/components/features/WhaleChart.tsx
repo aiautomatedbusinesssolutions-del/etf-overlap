@@ -94,13 +94,24 @@ export default function WhaleChart({ data, ticker, name }: WhaleChartProps) {
 
         {/* Others tooltip */}
         {showOthers && othersEntry && (
-          <div className="absolute right-0 top-0 z-10 w-44 rounded-lg border border-slate-700 bg-slate-800 p-3 shadow-xl">
-            <p className="mb-2 text-xs font-semibold text-slate-300">
-              Others ({othersEntry.weight.toFixed(1)}%)
+          <div className="absolute right-0 top-0 z-10 w-48 rounded-lg border border-slate-700 bg-slate-800 p-3 shadow-xl">
+            <p className="mb-1 text-xs font-semibold text-slate-200">
+              Remaining {othersEntry.othersCount ?? 0} Holdings
             </p>
-            <div className="max-h-32 space-y-1 overflow-y-auto text-xs text-slate-400">
-              <p>Remaining ~490 holdings each under 1.5% weight</p>
-            </div>
+            <p className="mb-2 text-xs text-slate-500">
+              {othersEntry.weight.toFixed(1)}% of fund
+            </p>
+            {othersEntry.othersSectorMix && othersEntry.othersSectorMix.length > 0 && (
+              <div className="space-y-1.5 border-t border-slate-700 pt-2">
+                <p className="text-xs font-medium text-slate-400">Sector Mix</p>
+                {othersEntry.othersSectorMix.slice(0, 5).map((s) => (
+                  <div key={s.sector} className="flex items-center justify-between text-xs">
+                    <span className="text-slate-300 truncate mr-2">{s.sector}</span>
+                    <span className="shrink-0 text-sky-400 font-medium">{s.weight.toFixed(1)}%</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
